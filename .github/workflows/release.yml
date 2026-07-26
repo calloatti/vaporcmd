@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - run: dotnet publish -c Release
+
+      - name: Locate steam_api64.dll
+        id: find_dll
+        run: |
+          $dll = Get-ChildItem -Recurse -Filter steam_api64.dll "$env:USERPROFILE\.nuget\packages\facepunch.steamworks.dll" | Select-Object -First 1
+          echo "dll_path=$($dll.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Create release package
+        run: |
+          $publishDir = "bin\Release\net8.0\win-x64\publish"
+          $packageDir = "vaporcmd-$($env:GITHUB_REF_NAME)"
+          New-Item -ItemType Directory -Path $packageDir -Force
+          Copy-Item "$publishDir\vaporcmd.exe" "$packageDir\"
+          Copy-Item "$publishDir\steam_appid.txt" "$packageDir\"
+          Copy-Item "${{ steps.find_dll.outputs.dll_path }}" "$packageDir\steam_api64.dll"
+          Compress-Archive -Path "$packageDir\*" -DestinationPath "$packageDir.zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: vaporcmd-*.zip
