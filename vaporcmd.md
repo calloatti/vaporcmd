@@ -110,8 +110,7 @@ matching the Steam Web API response format:
   "DescriptionFile": "C:/Repos/Mods/Automation Tools/workshop_description.txt",
   "ContentFolder": "C:/Users/me/Documents/Timberborn/Mods/Automation Tools",
   "PreviewFile": "C:/Repos/Mods/Automation Tools/thumbnail.jpg",
-  "Tags": ["Building", "Automation", "Tools"],
-  "ChangeNote": "Initial release"
+  "TagsFile": "C:/Repos/Mods/Automation Tools/workshop_tags.txt"
 }
 ```
 
@@ -133,8 +132,8 @@ if ($result.success) {
   "ItemId": "3082207506",
   "ContentFolder": "C:/Users/me/Documents/Timberborn/Mods/Automation Tools",
   "PreviewFile": "C:/Repos/Mods/Automation Tools/thumbnail.jpg",
-  "Tags": ["Building", "Automation", "Tools", "Quality of Life"],
-  "ChangeNote": "Fixed overflow bug; performance improvements"
+  "TagsFile": "C:/Repos/Mods/Automation Tools/workshop_tags.txt",
+  "ChangeNoteFile": "C:/Repos/Mods/Automation Tools/workshop_changenote.txt"
 }
 ```
 
@@ -151,7 +150,7 @@ if (-not $result.success) { throw $result.error }
   "Title": "Automation Tools - Updated Title",
   "DescriptionFile": "C:/Repos/Mods/Automation Tools/workshop_description.txt",
   "PreviewFile": "C:/Repos/Mods/Automation Tools/thumbnail.jpg",
-  "Tags": ["Building", "Automation", "Tools"]
+  "TagsFile": "C:/Repos/Mods/Automation Tools/workshop_tags.txt"
 }
 ```
 
