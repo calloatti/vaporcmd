@@ -82,6 +82,31 @@ $itemId = $result.itemId
 All paths are resolved to absolute paths against the current working directory.
 If a specified file or directory does not exist, the command errors out.
 
+## File formats
+
+Each file-based field expects a specific format:
+
+**DescriptionFile** — plain text file with the workshop description.
+
+**TagsFile** — one tag per line:
+```
+Mod
+Update 1.0
+Quality of life
+```
+
+**KvTagsFile** — `key=value` per line; empty value removes the key:
+```
+modVersion=1.5
+difficulty=hard
+oldKey=
+```
+
+**ChangeNoteFile** — raw text (only for `upload`):
+```
+Fixed crash on load; added new building.
+```
+
 ## Get command output
 
 `vaporcmd get <publishedfileid> <outfile>` writes a JSON file with field names
