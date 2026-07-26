@@ -34,7 +34,7 @@ Stdout last line is always JSON: `{"success":true}` or `{"success":false,"error"
 }
 ```
 
-See [vaporcmd.md](vaporcmd.md) for full field reference and command-specific behavior.
+See [examples/](examples/) for usage scripts, and [vaporcmd.md](vaporcmd.md) for full field reference.
 
 ## Build from source
 
