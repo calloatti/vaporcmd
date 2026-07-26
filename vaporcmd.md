@@ -50,7 +50,7 @@ $itemId = $result.itemId
 ```
 
 | Field | Type | Required | Description |
-|---|---|---|---|---|
+|---|---|---|---|
 | `ItemId` | string | create: no, upload/update: **yes** | PublishedFileId as string |
 | `Title` | string | create: **yes**, else no | Workshop title |
 | `DescriptionFile` | string | create: **yes**, else no | Path to description text file |
