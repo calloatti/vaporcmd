@@ -246,7 +246,7 @@ class Program
         Dictionary<string, string> kvTags = ReadKvTagsFile(manifest.KvTagsFile, log);
         if (kvTags == null && manifest.KvTagsFile != null) return 1;
 
-        int result = SubmitUpdate(new AppId_t(ReadAppId()), newItemId, title, desc, contentFolder, previewFile, tags, null, manifest.Language, kvTags, ParseVisibility(manifest.Visibility), metadataFile, log);
+        int result = SubmitUpdate(new AppId_t(ReadAppId()), newItemId, title, desc, contentFolder, previewFile, tags, null, manifest.Language, kvTags, ParseVisibility(manifest.Visibility) ?? ERemoteStoragePublishedFileVisibility.k_ERemoteStoragePublishedFileVisibilityUnlisted, metadataFile, log);
 
         if (result == 0)
         {
@@ -455,7 +455,7 @@ class Program
     static int SubmitUpdate(AppId_t appId, PublishedFileId_t itemId,
         string title, string desc, string contentFolder,
         string previewFile, List<string> tags, string changeNote, string language,
-        Dictionary<string, string> kvTags, ERemoteStoragePublishedFileVisibility visibility, string metadataFile, Log log)
+        Dictionary<string, string> kvTags, ERemoteStoragePublishedFileVisibility? visibility, string metadataFile, Log log)
     {
         UGCUpdateHandle_t handle = SteamUGC.StartItemUpdate(appId, itemId);
         if (handle == UGCUpdateHandle_t.Invalid)
@@ -528,9 +528,16 @@ class Program
             }
         }
 
-        log.Info($"  Visibility: {visibility}");
-        if (!SteamUGC.SetItemVisibility(handle, visibility))
-            log.Info("  Warning: SetItemVisibility returned false");
+        if (visibility.HasValue)
+        {
+            log.Info($"  Visibility: {visibility.Value}");
+            if (!SteamUGC.SetItemVisibility(handle, visibility.Value))
+                log.Info("  Warning: SetItemVisibility returned false");
+        }
+        else
+        {
+            log.Info("  Visibility: unchanged (not specified in manifest)");
+        }
 
         if (metadataFile != null)
         {
@@ -697,15 +704,16 @@ class Program
         return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
     }
 
-    static ERemoteStoragePublishedFileVisibility ParseVisibility(string s)
+    static ERemoteStoragePublishedFileVisibility? ParseVisibility(string s)
     {
-        return s?.ToLowerInvariant() switch
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.ToLowerInvariant() switch
         {
             "public" => ERemoteStoragePublishedFileVisibility.k_ERemoteStoragePublishedFileVisibilityPublic,
             "friends_only" => ERemoteStoragePublishedFileVisibility.k_ERemoteStoragePublishedFileVisibilityFriendsOnly,
             "private" => ERemoteStoragePublishedFileVisibility.k_ERemoteStoragePublishedFileVisibilityPrivate,
             "unlisted" => ERemoteStoragePublishedFileVisibility.k_ERemoteStoragePublishedFileVisibilityUnlisted,
-            _ => ERemoteStoragePublishedFileVisibility.k_ERemoteStoragePublishedFileVisibilityUnlisted
+            _ => null
         };
     }
 

@@ -58,7 +58,7 @@ $itemId = $result.itemId
 | `PreviewFile` | string | no | Path to thumbnail.jpg |
 | `TagsFile` | string | no | Path to tag file (one tag per line) |
 | `KvTagsFile` | string | no | Path to kvTag file (`key=value` per line; empty value removes key) |
-| `Visibility` | string | no | One of: public, friends_only, private, unlisted |
+| `Visibility` | string | no | One of: public, friends_only, private, unlisted (create default: unlisted; upload/update: preserve existing) |
 | `MetadataFile` | string | no | Path to metadata text file (≤1024 chars) |
 | `ChangeNoteFile` | string | no | Path to change note text file (only for `upload`) |
 | `Language` | string | no | Language code (default: "english") |
