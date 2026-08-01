@@ -6,7 +6,7 @@ Workshop operations (create item, upload content, update metadata).
 ## Usage
 
 ```
-vaporcmd <create|upload|update|get> <manifest.json|publishedfileid outfile>
+vaporcmd <create|upload|update|get|collection> <manifest.json|publishedfileid outfile|collectionid>
 ```
 
 Exit code: 0 = success, 1 = failure.
@@ -182,6 +182,34 @@ if (-not $result.success) { throw $result.error }
 ```powershell
 & vaporcmd.exe update manifest-update.json | Out-Null
 ```
+
+## Example: Sort a collection
+
+`collection` empties the given collection and re-adds **all of your published
+mods** sorted alphabetically by title. Newly published mods that aren't yet in
+the collection are added automatically.
+
+```
+vaporcmd collection <collectionid> [-dry]
+```
+
+- `<collectionid>` — numeric ID from the collection URL (`.../filedetails/?id=XXXX`).
+- `-dry` — print the plan (sorted mods, children to be removed) without changing anything.
+
+```powershell
+# Dry run first:
+& vaporcmd.exe collection 1234567890 -dry
+
+# Then live:
+& vaporcmd.exe collection 1234567890
+```
+
+Behavior:
+- Aborts if the collection ID is missing or does not exist.
+- Warns (but proceeds) if the collection contains children that are not one of
+  your published mods — they are removed from the collection but not deleted.
+- Uses `AddDependency`/`RemoveDependency` (official Steamworks SDK). Order is
+  achieved by empty + re-add in sorted order; Steam provides no official reorder API.
 
 ## Environment
 

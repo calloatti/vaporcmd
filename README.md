@@ -1,6 +1,6 @@
 # vaporcmd
 
-Steam Workshop upload tool using Steamworks.NET. Replaces steamcmd for Workshop operations (create item, upload content, update metadata).
+Steam Workshop upload tool using Steamworks.NET. Replaces steamcmd for Workshop operations (create item, upload content, update metadata, sort collections).
 
 ## Requirements
 
@@ -15,9 +15,19 @@ vaporcmd.exe create manifest.json
 vaporcmd.exe upload manifest.json
 vaporcmd.exe update manifest.json
 vaporcmd.exe get <publishedfileid> output.json
+vaporcmd.exe collection <collectionid> [-dry]
 ```
 
 Stdout last line is always JSON: `{"success":true}` or `{"success":false,"error":"..."}`.
+
+## Collection sorting
+
+`collection <collectionid> [-dry]` empties the collection and re-adds **all your published mods** in alphabetical order (new mods get added automatically). Use `-dry` to preview first. Aborts if the collection ID is missing or doesn't exist.
+
+```
+vaporcmd.exe collection 1234567890 -dry
+vaporcmd.exe collection 1234567890
+```
 
 ## Manifest example
 

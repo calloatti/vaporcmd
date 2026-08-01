@@ -88,7 +88,7 @@ class Program
         {
             ExtractHelpFile();
             PrintUsage();
-            _resultJson = """{"success":false,"error":"Usage: vaporcmd <create|upload|update|get> ..."}""";
+            _resultJson = """{"success":false,"error":"Usage: vaporcmd <create|upload|update|get|collection> ..."}""";
             return 1;
         }
 
@@ -138,6 +138,18 @@ class Program
                     return 1;
                 }
                 return GetItem(args[1], args[2], log);
+            }
+
+            if (command == "collection")
+            {
+                if (args.Length < 2)
+                {
+                    log.Info("Usage: vaporcmd collection <collectionid> [-dry]");
+                    _resultJson = """{"success":false,"error":"Usage: vaporcmd collection <collectionid> [-dry]"}""";
+                    return 1;
+                }
+                bool dryRun = args.Length >= 3 && args[2] == "-dry";
+                return SortCollection(args[1], dryRun, log);
             }
 
             string manifestPath = args[1];
@@ -452,6 +464,276 @@ class Program
         return 0;
     }
 
+    static int SortCollection(string collectionIdStr, bool dryRun, Log log)
+    {
+        if (!ulong.TryParse(collectionIdStr, out ulong collectionIdVal) || collectionIdVal == 0)
+        {
+            log.Info($"Invalid collection id: {collectionIdStr}");
+            _resultJson = $$"""{"success":false,"error":"Invalid collection id: {{EscapeJson(collectionIdStr)}}"}""";
+            return 1;
+        }
+
+        PublishedFileId_t collectionId = new PublishedFileId_t(collectionIdVal);
+        AppId_t appId = new AppId_t(ReadAppId());
+        log.Info($"CollectionID: {collectionId}");
+        if (dryRun) log.Info("DRY RUN: no changes will be made.");
+
+        if (!QueryCollectionChildren(collectionId, appId, log, out PublishedFileId_t[] currentChildren, out string collectionTitle))
+        {
+            _resultJson = $$"""{"success":false,"error":"Collection not found: {{collectionId}}"}""";
+            return 1;
+        }
+        log.Info($"Collection title: {collectionTitle}");
+        log.Info($"Current children: {currentChildren.Length}");
+
+        AccountID_t accountId = SteamUser.GetSteamID().GetAccountID();
+        if (!QueryPublishedMods(accountId, appId, log, out var published))
+        {
+            return 1;
+        }
+
+        published.Sort((a, b) => string.Compare(a.Item2, b.Item2, StringComparison.OrdinalIgnoreCase));
+
+        log.Info($"Published mods: {published.Count}");
+        foreach (var m in published)
+            log.Info($"  {m.Item2} ({m.Item1})");
+
+        var notInPublished = currentChildren
+            .Where(c => !published.Any(p => p.Item1.m_PublishedFileId == c.m_PublishedFileId))
+            .ToList();
+        if (notInPublished.Count > 0)
+        {
+            log.Info($"WARNING: {notInPublished.Count} child(ren) are not in your published mods and will be removed from the collection:");
+            foreach (var c in notInPublished)
+                log.Info($"  {c.m_PublishedFileId}");
+        }
+
+        if (dryRun)
+        {
+            log.Info("DRY RUN complete. No changes made.");
+            _resultJson = $$"""{"success":true,"dryRun":true,"mods":{{published.Count}},"removing":{{currentChildren.Length}},"adding":{{published.Count}}}""";
+            return 0;
+        }
+
+        int removed = 0;
+        foreach (var child in currentChildren)
+        {
+            EResult r = RemoveFromCollection(collectionId, child, log);
+            if (r != EResult.k_EResultOK)
+            {
+                _resultJson = $$"""{"success":false,"error":"Failed to remove child {{child}} from collection: {{r}}"}""";
+                return 1;
+            }
+            removed++;
+        }
+
+        int added = 0;
+        foreach (var m in published)
+        {
+            EResult r = AddToCollection(collectionId, m.Item1, log);
+            if (r != EResult.k_EResultOK)
+            {
+                _resultJson = $$"""{"success":false,"error":"Failed to add mod {{m.Item1}} to collection: {{r}}"}""";
+                return 1;
+            }
+            added++;
+        }
+
+        log.Info($"Done. Removed {removed}, added {added}.");
+        _resultJson = $$"""{"success":true,"removed":{{removed}},"added":{{added}}}""";
+        return 0;
+    }
+
+    static bool QueryCollectionChildren(PublishedFileId_t collectionId, AppId_t appId, Log log,
+        out PublishedFileId_t[] children, out string title)
+    {
+        children = Array.Empty<PublishedFileId_t>();
+        title = null;
+
+        UGCQueryHandle_t queryHandle = SteamUGC.CreateQueryUGCDetailsRequest(new[] { collectionId }, 1);
+        if (queryHandle == UGCQueryHandle_t.Invalid)
+        {
+            log.Info("CreateQueryUGCDetailsRequest failed");
+            return false;
+        }
+
+        SteamUGC.SetReturnChildren(queryHandle, true);
+
+        SteamAPICall_t call = SteamUGC.SendQueryUGCRequest(queryHandle);
+        if (call == SteamAPICall_t.Invalid)
+        {
+            SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+            log.Info("SendQueryUGCRequest failed");
+            return false;
+        }
+
+        EResult queryResult = EResult.k_EResultFail;
+        var queryDone = new ManualResetEvent(false);
+        CallResult<SteamUGCQueryCompleted_t> queryResultObj = CallResult<SteamUGCQueryCompleted_t>.Create((p, fail) =>
+        {
+            if (!fail && p.m_eResult == EResult.k_EResultOK && p.m_unNumResultsReturned > 0)
+                queryResult = p.m_eResult;
+            queryDone.Set();
+        });
+        queryResultObj.Set(call);
+        PumpCallbacks(queryDone, log, "QueryCollection");
+        queryResultObj.Dispose();
+
+        SteamUGCDetails_t details;
+        if (queryResult != EResult.k_EResultOK ||
+            !SteamUGC.GetQueryUGCResult(queryHandle, 0, out details) ||
+            details.m_eResult != EResult.k_EResultOK)
+        {
+            SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+            log.Info($"Collection not found: {collectionId}");
+            return false;
+        }
+
+        if (details.m_eFileType != EWorkshopFileType.k_EWorkshopFileTypeCollection)
+        {
+            SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+            log.Info($"Item {collectionId} is not a collection (type: {details.m_eFileType})");
+            return false;
+        }
+
+        title = details.m_rgchTitle ?? "";
+
+        if (details.m_unNumChildren > 0)
+        {
+            children = new PublishedFileId_t[details.m_unNumChildren];
+            SteamUGC.GetQueryUGCChildren(queryHandle, 0, children, details.m_unNumChildren);
+        }
+
+        SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+        return true;
+    }
+
+    static bool QueryPublishedMods(AccountID_t accountId, AppId_t appId, Log log,
+        out List<(PublishedFileId_t, string)> mods)
+    {
+        mods = new List<(PublishedFileId_t, string)>();
+
+        uint page = 1;
+        while (true)
+        {
+            UGCQueryHandle_t queryHandle = SteamUGC.CreateQueryUserUGCRequest(accountId,
+                EUserUGCList.k_EUserUGCList_Published,
+                EUGCMatchingUGCType.k_EUGCMatchingUGCType_Items,
+                EUserUGCListSortOrder.k_EUserUGCListSortOrder_CreationOrderAsc,
+                appId, appId, page);
+            if (queryHandle == UGCQueryHandle_t.Invalid)
+            {
+                log.Info("CreateQueryUserUGCRequest failed");
+                return false;
+            }
+
+            SteamAPICall_t call = SteamUGC.SendQueryUGCRequest(queryHandle);
+            if (call == SteamAPICall_t.Invalid)
+            {
+                SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+                log.Info("SendQueryUGCRequest failed");
+                return false;
+            }
+
+            EResult queryResult = EResult.k_EResultFail;
+            uint numResults = 0;
+            uint totalMatching = 0;
+            var queryDone = new ManualResetEvent(false);
+            CallResult<SteamUGCQueryCompleted_t> queryResultObj = CallResult<SteamUGCQueryCompleted_t>.Create((p, fail) =>
+            {
+                if (!fail && p.m_eResult == EResult.k_EResultOK)
+                {
+                    queryResult = p.m_eResult;
+                    numResults = p.m_unNumResultsReturned;
+                    totalMatching = p.m_unTotalMatchingResults;
+                }
+                queryDone.Set();
+            });
+            queryResultObj.Set(call);
+            PumpCallbacks(queryDone, log, "QueryUserUGC");
+            queryResultObj.Dispose();
+
+            if (queryResult != EResult.k_EResultOK)
+            {
+                SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+                log.Info($"User UGC query failed: {queryResult}");
+                return false;
+            }
+
+            for (uint i = 0; i < numResults; i++)
+            {
+                if (SteamUGC.GetQueryUGCResult(queryHandle, i, out SteamUGCDetails_t d))
+                    mods.Add((d.m_nPublishedFileId, d.m_rgchTitle ?? ""));
+            }
+
+            SteamUGC.ReleaseQueryUGCRequest(queryHandle);
+
+            log.Info($"Page {page}: {numResults} results (total matching: {totalMatching})");
+
+            if (numResults == 0 || mods.Count >= totalMatching)
+                break;
+            page++;
+        }
+
+        return true;
+    }
+
+    static EResult RemoveFromCollection(PublishedFileId_t collectionId, PublishedFileId_t childId, Log log)
+    {
+        log.Write($"  Removing {childId}...");
+        SteamAPICall_t call = SteamUGC.RemoveDependency(collectionId, childId);
+        if (call == SteamAPICall_t.Invalid)
+        {
+            log.Info(" failed");
+            return EResult.k_EResultFail;
+        }
+
+        EResult result = EResult.k_EResultFail;
+        var done = new ManualResetEvent(false);
+        CallResult<RemoveUGCDependencyResult_t> resultObj = CallResult<RemoveUGCDependencyResult_t>.Create((p, fail) =>
+        {
+            result = fail ? EResult.k_EResultFail : p.m_eResult;
+            done.Set();
+        });
+        resultObj.Set(call);
+        PumpCallbacks(done, log, "RemoveDependency");
+        resultObj.Dispose();
+
+        if (result == EResult.k_EResultOK)
+            log.Info(" done");
+        else
+            log.Info($" failed: {result}");
+        return result;
+    }
+
+    static EResult AddToCollection(PublishedFileId_t collectionId, PublishedFileId_t modId, Log log)
+    {
+        log.Write($"  Adding {modId}...");
+        SteamAPICall_t call = SteamUGC.AddDependency(collectionId, modId);
+        if (call == SteamAPICall_t.Invalid)
+        {
+            log.Info(" failed");
+            return EResult.k_EResultFail;
+        }
+
+        EResult result = EResult.k_EResultFail;
+        var done = new ManualResetEvent(false);
+        CallResult<AddUGCDependencyResult_t> resultObj = CallResult<AddUGCDependencyResult_t>.Create((p, fail) =>
+        {
+            result = fail ? EResult.k_EResultFail : p.m_eResult;
+            done.Set();
+        });
+        resultObj.Set(call);
+        PumpCallbacks(done, log, "AddDependency");
+        resultObj.Dispose();
+
+        if (result == EResult.k_EResultOK)
+            log.Info(" done");
+        else
+            log.Info($" failed: {result}");
+        return result;
+    }
+
     static int SubmitUpdate(AppId_t appId, PublishedFileId_t itemId,
         string title, string desc, string contentFolder,
         string previewFile, List<string> tags, string changeNote, string language,
@@ -748,7 +1030,7 @@ class Program
         Console.Error.WriteLine($"vaporcmd {verStr} - Steam Workshop upload tool");
         Console.Error.WriteLine();
         Console.Error.WriteLine("Usage:");
-        Console.Error.WriteLine("  vaporcmd <create|upload|update|get> ...");
+        Console.Error.WriteLine("  vaporcmd <create|upload|update|get|collection> ...");
         Console.Error.WriteLine();
         Console.Error.WriteLine("Commands:");
         Console.Error.WriteLine("  create   Create a new Workshop item (optionally with content + metadata).");
@@ -759,6 +1041,8 @@ class Program
         Console.Error.WriteLine("           (requires itemId, no content uploaded)");
         Console.Error.WriteLine("  get      Query item details and write JSON to a file.");
         Console.Error.WriteLine("           (usage: vaporcmd get <publishedfileid> <outfile>)");
+        Console.Error.WriteLine("  collection  Empty a collection and re-add all your published mods sorted by title.");
+        Console.Error.WriteLine("           (usage: vaporcmd collection <collectionid> [-dry])");
         Console.Error.WriteLine();
         Console.Error.WriteLine("Stdout result (last line, JSON):");
         Console.Error.WriteLine("  Success: {\"success\":true}");
@@ -783,6 +1067,7 @@ class Program
         Console.Error.WriteLine("  vaporcmd upload mymod.json");
         Console.Error.WriteLine("  vaporcmd update mymod.json");
         Console.Error.WriteLine("  vaporcmd get 1234567890 output.json");
+        Console.Error.WriteLine("  vaporcmd collection 1234567890 -dry");
         Console.Error.WriteLine();
         Console.Error.WriteLine("See vaporcmd.md for full examples.");
     }
